@@ -51,7 +51,7 @@ https://www.kaggle.com/datasets/parisrohan/credit-score-classification
 - 수치형 변수는 train 데이터에만 `StandardScaler`를 fit한 뒤 validation 데이터에는 transform만 적용
 - 데이터 누수 방지를 위해 scaler는 train split 이후 적용
 - `Credit_Score`는 `LabelEncoder`로 인코딩
-- `Type_of_Loan`은 고유 문자열 조합이 많아 원본 컬럼은 제거하고 파생변수로 변환
+- `Type_of_Loan`은 고유 문자열 조합이 6,261개로 많아 원본 컬럼은 제거하고 파생변수로 변환
 
 ## 파생변수 생성
 
@@ -74,7 +74,7 @@ https://www.kaggle.com/datasets/parisrohan/credit-score-classification
 - `Utilization_Debt_Interaction`
 
 ### Type_of_Loan 기반 파생변수
-`Type_of_Loan`은 고유 조합이 많아 원본 문자열을 그대로 사용하면 과적합 위험이 있다고 판단했습니다.  
+`Type_of_Loan`은 고유 문자열 조합이 6,261개로 많아 원본 문자열을 그대로 사용하면 과적합 위험이 있다고 판단했습니다.  
 따라서 원본 컬럼은 제거하고 다음 파생변수만 사용했습니다.
 
 - `Loan_Type_Count`
@@ -100,27 +100,67 @@ Input
 → Linear(64, 32)
 → ReLU
 → Linear(32, 3)
+```
 
-### 개선 사항 및 결과
-기존 MLP는 범주형 변수를 LabelEncoder로 숫자화한 뒤 수치형 변수와 함께 스케일링하여 입력했습니다.
+기본 MLP는 구현이 간단하지만, Label Encoding된 범주형 변수를 수치형 변수처럼 처리하기 때문에 범주 간 순서가 있는 것처럼 해석될 수 있다는 한계가 있습니다.
+
+### Final Model: TabTransformer
+최종 모델은 `TabTransformer`를 사용했습니다.  
+TabTransformer는 범주형 변수를 embedding으로 변환한 뒤 self-attention을 통해 범주형 변수 간 관계를 학습할 수 있습니다.  
+수치형 변수는 파생변수 추가 후 정규화하여 별도 입력으로 사용했습니다.
+
+주요 설정은 다음과 같습니다.
+
+```text
+dim = 32
+depth = 4
+heads = 4
+attn_dropout = 0.2
+ff_dropout = 0.2
+batch_size = 256
+learning_rate = 0.001
+weight_decay = 0.0001
+early_stopping patience = 7
+```
+
+클래스 불균형을 보정하기 위해 `CrossEntropyLoss`에 class weight를 적용했습니다.  
+특히 `Good` 클래스의 표본 수가 상대적으로 적어, 해당 클래스가 학습 과정에서 덜 무시되도록 loss 비중을 조정했습니다.
+
+## 개선 사항 및 결과
+
+기존 MLP는 범주형 변수를 `LabelEncoder`로 숫자화한 뒤 수치형 변수와 함께 스케일링하여 입력했습니다.  
 이는 구현이 간단하지만 범주 간 순서가 있는 것처럼 해석될 수 있고, 복잡한 범주형 정보를 충분히 반영하기 어렵습니다.
 
-개선 모델에서는 범주형 변수와 수치형 변수를 분리 처리하는 TabTransformer를 사용했습니다.
-또한 부채 대비 소득, 월급 대비 상환 부담, 연체 비율, 신용 거래 기간 관련 파생변수를 추가했습니다.
-Type_of_Loan은 고유 문자열 조합이 6,261개로 많아 원본 대신 대출 개수와 주요 대출 유형 여부 변수로 변환했습니다.
+개선 모델에서는 범주형 변수와 수치형 변수를 분리 처리하는 `TabTransformer`를 사용했습니다.  
+또한 부채 대비 소득, 월급 대비 상환 부담, 연체 비율, 신용 거래 기간 관련 파생변수를 추가했습니다.  
+`Type_of_Loan`은 고유 문자열 조합이 6,261개로 많아 원본 대신 대출 개수와 주요 대출 유형 여부 변수로 변환했습니다.  
 추가로 class weight와 early stopping을 적용하여 클래스 불균형과 과적합을 완화하고자 했습니다.
 
-## Classification Report
-| Class        | Precision | Recall | F1-score |
-| ------------ | --------: | -----: | -------: |
-| Good         |      0.73 |   0.82 |     0.77 |
-| Poor         |      0.79 |   0.83 |     0.81 |
-| Standard     |      0.85 |   0.79 |     0.82 |
-| Weighted Avg |      0.81 |   0.81 |     0.81 |
+### 모델 성능 비교
 
+| 모델 | 주요 설정 | Validation Accuracy |
+| --- | --- | ---: |
+| 기본 MLP | 64-32 hidden layer, batch size 32, epoch 20 | 71.70% |
+| 개선 MLP | 256-128-64 hidden layer, BatchNorm, Dropout, batch size 128 | 74.65% |
+| 개선 MLP + 추가 학습 | learning rate 0.0005, 추가 5 epoch | 75.42% |
+| TabTransformer | 파생변수, class weight, early stopping 적용 | 80.56% |
 
+최종적으로 TabTransformer 기반 개선 모델은 `80.56%`의 최고 Validation Accuracy를 기록했습니다.  
+기본 MLP 대비 `+8.86%p`, 개선 MLP + 추가 학습 대비 `+5.14%p` 향상되었습니다.
+
+### Classification Report
+
+| Class | Precision | Recall | F1-score |
+| --- | ---: | ---: | ---: |
+| Good | 0.73 | 0.82 | 0.77 |
+| Poor | 0.79 | 0.83 | 0.81 |
+| Standard | 0.85 | 0.79 | 0.82 |
+| Weighted Avg | 0.81 | 0.81 | 0.81 |
+
+Class weight 적용 후 `Good` 클래스의 recall이 개선되어, 소수 클래스에 대한 예측 성능도 함께 보완되었습니다.
 
 ## 사용 기술 스택
+
 - Python
 - Pandas
 - NumPy
