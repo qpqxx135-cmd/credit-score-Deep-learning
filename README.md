@@ -100,3 +100,31 @@ Input
 → Linear(64, 32)
 → ReLU
 → Linear(32, 3)
+
+###개선 사항 및 결과
+기존 MLP는 범주형 변수를 LabelEncoder로 숫자화한 뒤 수치형 변수와 함께 스케일링하여 입력했습니다.
+이는 구현이 간단하지만 범주 간 순서가 있는 것처럼 해석될 수 있고, 복잡한 범주형 정보를 충분히 반영하기 어렵습니다.
+
+개선 모델에서는 범주형 변수와 수치형 변수를 분리 처리하는 TabTransformer를 사용했습니다.
+또한 부채 대비 소득, 월급 대비 상환 부담, 연체 비율, 신용 거래 기간 관련 파생변수를 추가했습니다.
+Type_of_Loan은 고유 문자열 조합이 6,261개로 많아 원본 대신 대출 개수와 주요 대출 유형 여부 변수로 변환했습니다.
+추가로 class weight와 early stopping을 적용하여 클래스 불균형과 과적합을 완화하고자 했습니다.
+
+##Classification Report
+Class	Precision	Recall	F1-score
+Good	0.73	0.82	0.77
+Poor	0.79	0.83	0.81
+Standard	0.85	0.79	0.82
+Weighted Avg	0.81	0.81	0.81
+
+
+## 사용 기술 스택
+- Python
+- Pandas
+- NumPy
+- Matplotlib
+- Seaborn
+- Scikit-learn
+- PyTorch
+- TabTransformer
+- Google Colab
